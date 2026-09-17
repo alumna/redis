@@ -1,0 +1,17 @@
+name: alumna-redis
+version: 0.1.0
+
+dependencies:
+  alumna:
+    github: alumna/backend
+    version: ~> 0.7.0
+  redis:
+    github: jgaskins/redis
+    version: ~> 0.16.0
+
+authors:
+  - Paulo Coghi <paulo@airsailer.io>
+
+crystal: '>= 1.20.2'
+
+license: MIT
