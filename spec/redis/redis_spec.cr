@@ -11,6 +11,7 @@ describe Alumna::Redis do
     holder = Alumna::Redis.new(URI.parse(REDIS_URL))
     holder.ping.should eq("PONG")
     holder.client.should be_a(::Redis::Client)
+    holder.cluster?.should be_false
     holder.close
   end
 
@@ -67,6 +68,23 @@ describe Alumna::Redis do
     end
   end
 
+  it "hash-tags service cache names that share a path" do
+    Alumna::Redis.tagged_cache_name("alumna:get:/posts:12").should eq("{/posts}:get:12")
+    Alumna::Redis.tagged_cache_name("alumna:fgen:/posts").should eq("{/posts}:fgen")
+    Alumna::Redis.tagged_cache_name("alumna:find:3:/posts:abc").should eq("{/posts}:find:3:abc")
+    Alumna::Redis.tagged_cache_name("plain").should eq("plain")
+    Alumna::Redis.tagged_cache_name("alumna:get:/posts").should eq("alumna:get:/posts")
+    Alumna::Redis.tagged_cache_name("alumna:get::12").should eq("alumna:get::12")
+    Alumna::Redis.tagged_cache_name("alumna:get:/posts:").should eq("alumna:get:/posts:")
+    Alumna::Redis.tagged_cache_name("alumna:fgen:").should eq("alumna:fgen:")
+    Alumna::Redis.tagged_cache_name("alumna:find:3").should eq("alumna:find:3")
+    Alumna::Redis.tagged_cache_name("alumna:find::/posts:abc").should eq("alumna:find::/posts:abc")
+    Alumna::Redis.tagged_cache_name("alumna:find:3:/posts").should eq("alumna:find:3:/posts")
+    Alumna::Redis.tagged_cache_name("alumna:find:3:/posts:").should eq("alumna:find:3:/posts:")
+    Alumna::Redis.tagged_cache_name("alumna:find:3::abc").should eq("alumna:find:3::abc")
+    SHARED.cache_redis_key("alumna:get:/posts:12").should eq("#{SPEC_PREFIX}alumna:cache:{/posts}:get:12")
+  end
+
   it "uses default port prefixes and joins a global prefix" do
     SHARED.cache_prefix.should eq(Alumna::Redis::CACHE_PREFIX)
     SHARED.session_prefix.should eq(Alumna::Redis::SESSION_PREFIX)
@@ -108,5 +126,51 @@ describe Alumna::Redis do
   it "closes the client" do
     holder = Alumna::Redis.new(REDIS_URL)
     holder.close.should be_nil
+  end
+
+  it "raises Error without URI userinfo when Cluster is down" do
+    ex = expect_raises(Alumna::Redis::Error) do
+      Alumna::Redis.new(dead_url, cluster: true)
+    end
+    msg = ex.message || ""
+    msg.includes?("secret").should be_false
+    msg.includes?("user:").should be_false
+  end
+end
+
+describe "Alumna::Redis cluster" do
+  it "pings a live Cluster from a String URI" do
+    url = require_cluster_url
+    holder = Alumna::Redis.new(url, cluster: true)
+    holder.ping.should eq("PONG")
+    holder.client.should be_a(::Redis::Cluster)
+    holder.cluster?.should be_true
+    holder.close.should be_nil
+  end
+
+  it "pings a live Cluster from a URI object" do
+    url = require_cluster_url
+    holder = Alumna::Redis.new(URI.parse(url), cluster: true)
+    holder.ping.should eq("PONG")
+    holder.close
+  end
+
+  it "builds from_uri and from_env with cluster: true" do
+    url = require_cluster_url
+    from_obj = Alumna::Redis.from_uri(URI.parse(url), prefix: "from-uri-c:", cluster: true)
+    from_obj.ping.should eq("PONG")
+    from_obj.prefix.should eq("from-uri-c:")
+    from_obj.cluster?.should be_true
+    from_obj.close
+
+    ENV["ALUMNA_REDIS_CLUSTER_SPEC"] = url
+    begin
+      holder = Alumna::Redis.from_env("ALUMNA_REDIS_CLUSTER_SPEC", prefix: "env-c:", cluster: true)
+      holder.ping.should eq("PONG")
+      holder.prefix.should eq("env-c:")
+      holder.close
+    ensure
+      ENV.delete("ALUMNA_REDIS_CLUSTER_SPEC")
+    end
   end
 end

@@ -4,7 +4,7 @@
 
 Redis stores for the [Alumna Backend Framework](https://github.com/alumna/backend).
 
-`Alumna::Redis` holds one `Redis::Client` for the process:
+`Alumna::Redis` holds one Redis client for the process:
 
 - `redis.cache` — `Alumna::RedisCache` (`Alumna::Cache`)
 - `redis.session_store` — `Alumna::RedisSessionStore` (`Alumna::SessionStore`)
@@ -44,7 +44,7 @@ dependencies:
 
 Then run `shards install`.
 
-Needs Alumna Backend **0.8** or later (`Cache`, `SessionStore`, and `RateLimitStore`). Needs a single Redis server. Default port is **6379**. Cluster and Sentinel are not supported.
+Needs Alumna Backend **0.8** or later (`Cache`, `SessionStore`, and `RateLimitStore`). Default is a single Redis server on port **6379**. Pass `cluster: true` to use Redis Cluster (any node URI). Sentinel is not supported.
 
 For a local unpublished backend clone, use gitignored `shard.override.yml`:
 
@@ -65,14 +65,20 @@ redis = Alumna::Redis.new(URI.parse(ENV["REDIS_URL"]))
 redis.ping # => "PONG"
 ```
 
-`Alumna::Redis.new` accepts a `URI` or a `String`. Logical database comes from the URI path (`/0`).
+`Alumna::Redis.new` accepts a `URI` or a `String`. Default topology is single-node `Redis::Client`. Logical database comes from the URI path (`/0`).
+
+Redis Cluster is explicit. Pass `cluster: true`. The URI may be **any** node. The driver discovers the rest. Cluster uses db **0**. A URI path `/N` does not select a logical database on Cluster.
+
+```crystal
+redis = Alumna::Redis.new(URI.parse(ENV["REDIS_CLUSTER_URL"]), cluster: true)
+```
 
 | Scheme | Transport |
 |---|---|
 | `redis://` | TCP |
 | `rediss://` | TLS |
 
-User and password in the URI are Redis AUTH. There is no Unix socket.
+User and password in the URI are Redis AUTH. There is no Unix socket. Sentinel is not supported. Redis Cluster in this driver has no `MULTI`. The cache, session, and rate-limit ports do not use `MULTI`.
 
 From the environment (default `REDIS_URL`):
 
@@ -80,6 +86,8 @@ From the environment (default `REDIS_URL`):
 redis = Alumna::Redis.from_env
 # or:
 redis = Alumna::Redis.from_env("REDIS_URL")
+# Cluster:
+# redis = Alumna::Redis.from_env("REDIS_CLUSTER_URL", cluster: true)
 ```
 
 Close the client when the process stops:
@@ -113,6 +121,16 @@ redis = Alumna::Redis.new(
 ```
 
 A cache key `posts:1` then becomes `shop:alumna:cache:posts:1`.
+
+Service cache keys from `Alumna.cache` get a hash-tag around the service path. Then get, find, and collection generation hash to one Cluster slot:
+
+| Logical `Cache` key | Redis key |
+|---|---|
+| `alumna:get:/posts:12` | `…alumna:cache:{/posts}:get:12` |
+| `alumna:fgen:/posts` | `…alumna:cache:{/posts}:fgen` |
+| `alumna:find:{gen}:/posts:{hash}` | `…alumna:cache:{/posts}:find:{gen}:{hash}` |
+
+This changes keys already stored in Redis under the untagged shape. Session and rate-limit keys stay one key with no hash-tag.
 
 ---
 
@@ -186,7 +204,7 @@ store = redis.rate_limit_store(60.seconds)
 app.before Alumna.rate_limit(limit: 100, store: store)
 ```
 
-Two processes that share this Redis share the counters.
+Two processes that share this Redis share the counters. One Redis key per limiter key, so the Lua script stays on one Cluster slot.
 
 ---
 
@@ -200,7 +218,7 @@ Connection and driver errors raise `Alumna::Redis::Error`. The message never inc
 
 - Do not log the Redis URI. It may contain a password.
 - `Alumna::Redis::Error` strips `//user:pass@` from messages.
-- Put the URI in `REDIS_URL`. Do not commit a password.
+- Put the URI in `REDIS_URL` or `REDIS_CLUSTER_URL`. Do not commit a password.
 - Use `rediss://` when the link is not trusted.
 - Use one client per process.
 
@@ -210,7 +228,23 @@ Connection and driver errors raise `Alumna::Redis::Error`. The message never inc
 
 Specs need Redis. Set `REDIS_URL` or use `redis://127.0.0.1:6379/0`. If Redis is down, the spec process stops with a clear message.
 
-GitHub Actions starts Redis 8.0. Jobs run `crystal tool format --check`, `crystal spec`, `crystal spec -Dpreview_mt -Dexecution_context`, and kcov on `src/` (line-rate 1.000).
+Cluster examples need `REDIS_CLUSTER_URL`. They are pending when that variable is unset. They fail with a clear message when it is set and Cluster is down.
+
+Start a local Cluster on `127.0.0.1:6380`–`6385` (3 masters, 1 replica each):
+
+```bash
+bash script/dev_cluster.sh
+REDIS_CLUSTER_URL=redis://127.0.0.1:6380 crystal spec
+```
+
+GitHub Actions:
+
+- Format check
+- Specs against one Redis 8.0 on port **6379**
+- Specs against Redis Cluster (`REDIS_CLUSTER_URL=redis://127.0.0.1:6380`) plus standalone 6379
+- kcov on `src/` (line-rate 1.000) against one Redis on port **6379** only
+
+`preview_mt` + `execution_context` runs on the spec jobs.
 
 ---
 
