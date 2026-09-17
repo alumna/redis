@@ -126,6 +126,21 @@ describe Alumna::RedisCache do
     cache.get(key).should eq("2".to_slice)
   end
 
+  it "stores get find and fgen under a path hash-tag" do
+    cache = SHARED.cache
+    path = "/p-#{uniq}"
+    get_logical = "alumna:get:#{path}:12"
+    fgen_logical = "alumna:fgen:#{path}"
+    find_logical = "alumna:find:1:#{path}:abc"
+    cache.set(get_logical, "v".to_slice)
+    SHARED.client.get(SHARED.cache_redis_key(get_logical)).should eq("v")
+    cache.get(get_logical).should eq("v".to_slice)
+    cache.incr(fgen_logical).should eq(1)
+    SHARED.client.get(SHARED.cache_redis_key(fgen_logical)).should eq("1")
+    cache.set(find_logical, "[]".to_slice)
+    SHARED.client.get(SHARED.cache_redis_key(find_logical)).should eq("[]")
+  end
+
   it "uses the cache prefix so two holders do not collide" do
     a = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
     b = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")

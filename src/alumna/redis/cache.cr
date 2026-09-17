@@ -1,4 +1,6 @@
 # Redis byte cache. Keys use the holder cache prefix.
+# Service get/find/fgen names that share a path get a hash-tag (one Cluster slot).
+# Logical Cache keys stay alumna:get: / alumna:fgen: / alumna:find:.
 # TTL is SET PX (milliseconds). ttl nil means no expiry. ttl must be > 0.
 # get copies the slice. incr is Redis INCR (a missing key becomes 1).
 class Alumna::RedisCache < Alumna::Cache
@@ -49,7 +51,7 @@ class Alumna::RedisCache < Alumna::Cache
   end
 
   private def full_key(key : String) : String
-    @redis.key(@redis.cache_prefix, key)
+    @redis.cache_redis_key(key)
   end
 
   # Redis PX is whole milliseconds. A positive ttl below 1 ms becomes 1 ms.

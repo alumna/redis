@@ -46,7 +46,7 @@ jobs:
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: latest
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             lib
@@ -56,6 +56,48 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-crystal-latest-shards-
       - run: shards install
+      - name: Run specs (Single-Threaded)
+        run: crystal spec --error-trace --verbose
+      - name: Run specs (Multi-Threaded)
+        run: crystal spec -Dpreview_mt -Dexecution_context --error-trace --verbose
+
+  cluster:
+    name: Redis Cluster
+    runs-on: ubuntu-latest
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      REDIS_CLUSTER_URL: redis://127.0.0.1:6380
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+      - uses: actions/cache@v6
+        with:
+          path: |
+            lib
+            ~/.cache/shards
+            %USERPROFILE%\.cache\shards
+          key: ${{ runner.os }}-crystal-latest-shards-${{ hashFiles('shard.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-crystal-latest-shards-
+      - run: shards install
+      - name: Install Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo service redis-server stop || true
+      - name: Start standalone Redis
+        run: |
+          set -euo pipefail
+          redis-server --port 6379 --bind 127.0.0.1 --daemonize yes --save "" --appendonly no
+          for _ in $(seq 1 50); do
+            redis-cli -p 6379 ping && break
+            sleep 0.1
+          done
+          redis-cli -p 6379 ping
+      - name: Start Redis Cluster
+        run: bash script/dev_cluster.sh
       - name: Run specs (Single-Threaded)
         run: crystal spec --error-trace --verbose
       - name: Run specs (Multi-Threaded)
@@ -90,7 +132,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y kcov
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             lib

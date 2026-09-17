@@ -1,17 +1,26 @@
 require "./redis/errors"
+require "redis/cluster"
 
-# One Redis::Client for the process. Cache, session, and rate limit ports.
-# v1 is single-node Client only. No Cluster. No Sentinel.
+# One Redis client for the process. Cache, session, and rate limit ports.
+# Default is single-node Redis::Client. Pass cluster: true for Redis::Cluster.
+# Cluster URI may be any node; the driver discovers the rest. Cluster uses db 0.
+# No Sentinel.
 class Alumna::Redis
   CACHE_PREFIX      = "alumna:cache:"
   SESSION_PREFIX    = "alumna:sid:"
   RATE_LIMIT_PREFIX = "alumna:rl:"
 
-  getter client : ::Redis::Client
+  # Logical Cache keys from Alumna.cache. Do not change the backend rule.
+  GET_LOGICAL  = "alumna:get:"
+  FGEN_LOGICAL = "alumna:fgen:"
+  FIND_LOGICAL = "alumna:find:"
+
+  getter client : ::Redis::Client | ::Redis::Cluster
   getter prefix : String
   getter cache_prefix : String
   getter session_prefix : String
   getter rate_limit_prefix : String
+  getter? cluster : Bool
 
   def initialize(
     uri : URI | String,
@@ -19,14 +28,20 @@ class Alumna::Redis
     cache_prefix : String = CACHE_PREFIX,
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
+    cluster : Bool = false,
   )
     @prefix = prefix
     @cache_prefix = cache_prefix
     @session_prefix = session_prefix
     @rate_limit_prefix = rate_limit_prefix
+    @cluster = cluster
     @client = begin
       parsed = uri.is_a?(String) ? URI.parse(uri) : uri
-      ::Redis::Client.new(parsed)
+      if cluster
+        ::Redis::Cluster.new(parsed)
+      else
+        ::Redis::Client.new(parsed)
+      end
     rescue ex
       raise Errors.wrap(ex)
     end
@@ -38,8 +53,9 @@ class Alumna::Redis
     cache_prefix : String = CACHE_PREFIX,
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
+    cluster : Bool = false,
   )
-    new(uri, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix)
+    new(uri, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix, cluster: cluster)
   end
 
   def self.from_env(
@@ -48,17 +64,20 @@ class Alumna::Redis
     cache_prefix : String = CACHE_PREFIX,
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
+    cluster : Bool = false,
   )
     value = ENV[name]?
     if value.nil? || value.empty?
       raise Error.new("Missing environment variable #{name}")
     end
-    new(value, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix)
+    new(value, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix, cluster: cluster)
   end
 
-  # PING. Returns "PONG". Raises Error with userinfo stripped on failure.
+  # PING. Returns "PONG". Cluster run() needs a key, so we send PING with a
+  # dummy argument (valid on Client and Cluster). Raises Error with userinfo
+  # stripped on failure.
   def ping : String
-    @client.ping.as?(String) || "PONG"
+    @client.ping("PONG").as?(String) || "PONG"
   rescue ex
     raise Errors.wrap(ex)
   end
@@ -74,6 +93,53 @@ class Alumna::Redis
       io << port_prefix
       io << name
     }
+  end
+
+  # Redis cache key for a logical Cache name. Service get/find/fgen keys that
+  # share a path get a hash-tag so they hash to one Cluster slot.
+  def cache_redis_key(logical : String) : String
+    key(@cache_prefix, self.class.tagged_cache_name(logical))
+  end
+
+  # Map logical Cache keys to Redis names. Other keys are unchanged.
+  # alumna:get:/posts:12          → {/posts}:get:12
+  # alumna:fgen:/posts            → {/posts}:fgen
+  # alumna:find:{gen}:/posts:{fp} → {/posts}:find:{gen}:{fp}
+  def self.tagged_cache_name(key : String) : String
+    if key.starts_with?(GET_LOGICAL)
+      rest = key[GET_LOGICAL.size..]
+      colon = rest.rindex(':')
+      return key unless colon
+      return key if colon == 0 || colon >= rest.size - 1
+      path = rest[0, colon]
+      id = rest[colon + 1..]
+      String.build { |io|
+        io << '{' << path << "}:get:" << id
+      }
+    elsif key.starts_with?(FGEN_LOGICAL)
+      path = key[FGEN_LOGICAL.size..]
+      return key if path.empty?
+      String.build { |io|
+        io << '{' << path << "}:fgen"
+      }
+    elsif key.starts_with?(FIND_LOGICAL)
+      rest = key[FIND_LOGICAL.size..]
+      first = rest.index(':')
+      return key unless first
+      return key if first == 0
+      gen = rest[0, first]
+      tail = rest[first + 1..]
+      last = tail.rindex(':')
+      return key unless last
+      return key if last == 0 || last >= tail.size - 1
+      path = tail[0, last]
+      fingerprint = tail[last + 1..]
+      String.build { |io|
+        io << '{' << path << "}:find:" << gen << ':' << fingerprint
+      }
+    else
+      key
+    end
   end
 end
 
