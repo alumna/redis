@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-09-17
 
 ### Added
 * Requires Alumna Backend `~> 0.8.0`.

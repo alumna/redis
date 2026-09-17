@@ -4,7 +4,7 @@ Official Redis stores for Alumna Backend. Not a Service adapter. No `AdapterSuit
 
 Driver: `jgaskins/redis`. Default topology: single-node `Redis::Client`. Redis Cluster: `cluster: true` (any node URI). No Sentinel. No `MULTI` on Cluster.
 
-## Delivered (Unreleased)
+## Delivered - 0.1.0
 
 * `Alumna::Redis` connection holder: `new` / `from_uri` / `from_env`, `ping`, `close`. Default `Redis::Client`. `cluster: true` opens `Redis::Cluster`.
 * Key prefixes: optional global prefix plus `alumna:cache:`, `alumna:sid:`, `alumna:rl:`.
@@ -21,4 +21,4 @@ Driver: `jgaskins/redis`. Default topology: single-node `Redis::Client`. Redis C
 
 * Sentinel is not available in the driver.
 
-No queue. No pub/sub. NATS is the intended bus for those.
+Queue and pub/sub not worked yet.
