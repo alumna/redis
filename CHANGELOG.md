@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+* Requires Alumna Backend `~> 0.8.0`.
 * `Alumna::Redis` connection holder. `new(uri)`, `from_uri`, and `from_env`. `ping` and `close`.
 * Optional global key prefix. Default port prefixes: `alumna:cache:`, `alumna:sid:`, `alumna:rl:`.
 * `Alumna::Redis::Error` and `Errors.safe_message` / `Errors.wrap`. Messages never include URI userinfo.

@@ -37,15 +37,16 @@ Add it to your `shard.yml`:
 dependencies:
   alumna:
     github: alumna/backend
+    version: ~> 0.8.0
   alumna-redis:
     github: alumna/redis
 ```
 
 Then run `shards install`.
 
-Needs a single Redis server. Default port is **6379**. Cluster and Sentinel are not supported.
+Needs Alumna Backend **0.8** or later (`Cache`, `SessionStore`, and `RateLimitStore`). Needs a single Redis server. Default port is **6379**. Cluster and Sentinel are not supported.
 
-Until Alumna 0.8 is published, local work uses gitignored `shard.override.yml`:
+For a local unpublished backend clone, use gitignored `shard.override.yml`:
 
 ```yaml
 dependencies:
