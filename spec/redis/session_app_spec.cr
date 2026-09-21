@@ -3,7 +3,7 @@ require "alumna/testing"
 
 describe "Alumna.session(redis.session_store)" do
   it "authenticates on a second app with the cookie from the first" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       sessions_a = Alumna::Session.new(holder.session_store(ttl: 1.hour))
       sessions_b = Alumna::Session.new(Alumna::RedisSessionStore.new(holder, 1.hour))
@@ -44,7 +44,7 @@ describe "Alumna.session(redis.session_store)" do
   end
 
   it "rejects an unknown cookie on a second app" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       sessions = Alumna::Session.new(holder.session_store)
       app = Alumna::App.new
@@ -60,7 +60,7 @@ describe "Alumna.session(redis.session_store)" do
   end
 
   it "stops the session so a second app is unauthorized" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       store = holder.session_store(ttl: 1.hour)
       sessions_a = Alumna::Session.new(store)

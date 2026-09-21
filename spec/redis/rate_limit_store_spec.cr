@@ -16,8 +16,8 @@ describe Alumna::RedisRateLimitStore do
   it "increments the same key and keeps one reset_at" do
     store = SHARED.rate_limit_store(1.hour)
     key = uniq
-    c1, t1 = store.hit(key)
-    c2, t2 = store.hit(key)
+    c1, t1 = must_ok(store.hit(key))
+    c2, t2 = must_ok(store.hit(key))
     c1.should eq(1)
     c2.should eq(2)
     t1.to_unix.should eq(t2.to_unix)
@@ -28,25 +28,25 @@ describe Alumna::RedisRateLimitStore do
     store = SHARED.rate_limit_store(1.hour)
     a = uniq
     b = uniq
-    store.hit(a)[0].should eq(1)
-    store.hit(b)[0].should eq(1)
-    store.hit(a)[0].should eq(2)
+    must_ok(store.hit(a))[0].should eq(1)
+    must_ok(store.hit(b))[0].should eq(1)
+    must_ok(store.hit(a))[0].should eq(2)
   end
 
   it "starts a new window after expiry" do
     store = SHARED.rate_limit_store(50.milliseconds)
     key = uniq
-    store.hit(key)[0].should eq(1)
-    store.hit(key)[0].should eq(2)
+    must_ok(store.hit(key))[0].should eq(1)
+    must_ok(store.hit(key))[0].should eq(2)
     sleep 80.milliseconds
-    store.hit(key)[0].should eq(1)
+    must_ok(store.hit(key))[0].should eq(1)
   end
 
   it "sets PEXPIRE when the key has a count but no TTL" do
     store = SHARED.rate_limit_store(1.hour)
     key = uniq
     SHARED.client.set(SHARED.key(SHARED.rate_limit_prefix, key), "4")
-    count, reset_at = store.hit(key)
+    count, reset_at = must_ok(store.hit(key))
     count.should eq(5)
     reset_at.should be > Time.utc
   end
@@ -61,26 +61,27 @@ describe Alumna::RedisRateLimitStore do
   end
 
   it "uses the rate-limit prefix so two holders do not collide" do
-    a = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
-    b = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    a = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
+    b = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       key = "same"
-      a.rate_limit_store(1.hour).hit(key)[0].should eq(1)
-      b.rate_limit_store(1.hour).hit(key)[0].should eq(1)
-      a.rate_limit_store(1.hour).hit(key)[0].should eq(2)
+      must_ok(a.rate_limit_store(1.hour).hit(key))[0].should eq(1)
+      must_ok(b.rate_limit_store(1.hour).hit(key))[0].should eq(1)
+      must_ok(a.rate_limit_store(1.hour).hit(key))[0].should eq(2)
     ensure
       a.close
       b.close
     end
   end
 
-  it "wraps a driver error without URI userinfo" do
-    holder = Alumna::Redis.new(dead_url(lazy: true))
+  it "returns StoreError without URI userinfo" do
+    holder = must_redis(Alumna::Redis.new(dead_url(lazy: true)))
     begin
-      ex = expect_raises(Alumna::Redis::Error) do
-        holder.rate_limit_store.hit("x")
+      result = holder.rate_limit_store.hit("x")
+      result.should be_a(Alumna::StoreError)
+      if result.is_a?(Alumna::StoreError)
+        result.message.includes?("secret").should be_false
       end
-      (ex.message || "").includes?("secret").should be_false
     ensure
       holder.close
     end

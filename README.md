@@ -44,9 +44,9 @@ dependencies:
 
 Then run `shards install`.
 
-Needs Alumna Backend **0.8** or later (`Cache`, `SessionStore`, and `RateLimitStore`). Default is a single Redis server on port **6379**. Pass `cluster: true` to use Redis Cluster (any node URI). Sentinel is not supported.
+Needs Alumna Backend with `StoreError` on `Cache`, `SessionStore`, and `RateLimitStore`. Default is a single Redis server on port **6379**. Pass `cluster: true` to use Redis Cluster (any node URI). Sentinel is not supported.
 
-For a local unpublished backend clone, use gitignored `shard.override.yml`:
+Until that backend is published, use gitignored `shard.override.yml`:
 
 ```yaml
 dependencies:
@@ -62,7 +62,11 @@ dependencies:
 require "alumna-redis"
 
 redis = Alumna::Redis.new(URI.parse(ENV["REDIS_URL"]))
-redis.ping # => "PONG"
+if redis.is_a?(Alumna::Redis::Error)
+  # Handle the connect failure. The message has no URI userinfo.
+else
+  redis.ping # => "PONG" or Error
+end
 ```
 
 `Alumna::Redis.new` accepts a `URI` or a `String`. Default topology is single-node `Redis::Client`. Logical database comes from the URI path (`/0`).
@@ -80,7 +84,7 @@ redis = Alumna::Redis.new(URI.parse(ENV["REDIS_CLUSTER_URL"]), cluster: true)
 
 User and password in the URI are Redis AUTH. There is no Unix socket. Sentinel is not supported. Redis Cluster in this driver has no `MULTI`. The cache, session, and rate-limit ports do not use `MULTI`.
 
-From the environment (default `REDIS_URL`):
+From the environment (default `REDIS_URL`). Missing or empty env raises `ArgumentError`:
 
 ```crystal
 redis = Alumna::Redis.from_env
@@ -140,16 +144,21 @@ This changes keys already stored in Redis under the untagged shape. Session and 
 
 ```crystal
 cache = redis.cache
+got = cache.get("k")
+if got.is_a?(Alumna::StoreError)
+  # Store down. Not a miss.
+elsif got
+  # hit
+end
 cache.set("k", "hello".to_slice, 30.seconds)
-cache.get("k") # => Bytes of "hello"
-cache.set_nx("k", "nope".to_slice) # => false
+cache.set_nx("k", "nope".to_slice) # => false or StoreError
 cache.delete("k")
-cache.incr("gen") # => 1
+cache.incr("gen") # => 1 or StoreError
 ```
 
 `get` copies the byte slice. Mutation of a returned slice does not change Redis.
 
-`incr` is Redis `INCR`. A missing key becomes 1. A non-integer value raises `Alumna::Redis::Error`. Collection generation keys from `Alumna.cache` have no TTL. Do not pass a TTL on `incr`.
+`incr` is Redis `INCR`. A missing key becomes 1. A non-integer value returns `Alumna::StoreError`. Collection generation keys from `Alumna.cache` have no TTL. Do not pass a TTL on `incr`.
 
 ---
 
@@ -162,12 +171,16 @@ require "alumna"
 require "alumna-redis"
 
 redis = Alumna::Redis.new(URI.parse(ENV["REDIS_URL"]))
-rule = Alumna.cache(redis.cache, ttl: 30.seconds)
+if redis.is_a?(Alumna::Redis::Error)
+  # Handle the connect failure.
+else
+  rule = Alumna.cache(redis.cache, ttl: 30.seconds)
 
-app.use "/posts", Alumna.memory(PostSchema) {
-  before rule, on: :read
-  after rule
-}
+  app.use "/posts", Alumna.memory(PostSchema) {
+    before rule, on: :read
+    after rule
+  }
+end
 ```
 
 Two processes that share this Redis share **get** results (write-through on create/update/patch). **Find** cache is the list that one process loaded. Share find across processes only when those processes also share the document store.
@@ -184,7 +197,8 @@ sessions = Alumna::Session.new(store, secure: true)
 app.before sessions.rule
 
 # In login:
-sessions.start(ctx, Alumna.hash(user_id: id))
+started = sessions.start(ctx, Alumna.hash(user_id: id))
+next Alumna::ServiceError.internal(started.message) if started.is_a?(Alumna::StoreError)
 ```
 
 Two processes that share this Redis share the session. Login on instance A. A request on instance B with the same cookie is authenticated.
@@ -210,7 +224,34 @@ Two processes that share this Redis share the counters. One Redis key per limite
 
 ## 8. Errors
 
-Connection and driver errors raise `Alumna::Redis::Error`. The message never includes URI userinfo (user and password).
+`Alumna::Redis::Error` is a **struct**, not an Exception. Holder `new` / `from_uri` / `from_env` / `ping` / `close` return `T | Error`. Cache, session, and rate-limit port methods return backend `Alumna::StoreError` on driver failure. The message never includes URI userinfo (user and password).
+
+In the table, `Error` is `Alumna::Redis::Error`.
+
+| Method | Type |
+|---|---|
+| `new`, `from_uri`, `from_env` | `Alumna::Redis \| Error` |
+| `ping` | `String \| Error` |
+| `close` | `Nil \| Error` |
+| `RedisCache#get` | `Bytes? \| StoreError` |
+| `RedisCache#set` / `delete` | `Nil \| StoreError` |
+| `RedisCache#set_nx` | `Bool \| StoreError` |
+| `RedisCache#incr` | `Int64 \| StoreError` |
+| `RedisSessionStore#get` | `Hash? \| StoreError` |
+| `RedisSessionStore#set` / `delete` | `Nil \| StoreError` |
+| `RedisRateLimitStore#hit` | `{Int32, Time} \| StoreError` |
+
+`Cache#get` `nil` is a miss. `SessionStore#get` `nil` is no session. `StoreError` is store down. `Alumna.cache` / `Alumna.session` / `Alumna.rate_limit` map `StoreError` to `ServiceError.internal` (HTTP 500).
+
+These calls raise `ArgumentError`. They do not return `Error`.
+
+| Mistake | Methods |
+|---|---|
+| Empty URL | `new`, `from_uri` |
+| URI that does not parse | `new`, `from_uri`, `from_env` |
+| Missing or empty environment variable | `from_env` |
+| `ttl <= 0` | cache `set` / `set_nx`, session `set` / boot |
+| `window <= 0` | rate-limit store boot |
 
 ---
 

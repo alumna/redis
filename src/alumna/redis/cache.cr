@@ -3,11 +3,12 @@
 # Logical Cache keys stay alumna:get: / alumna:fgen: / alumna:find:.
 # TTL is SET PX (milliseconds). ttl nil means no expiry. ttl must be > 0.
 # get copies the slice. incr is Redis INCR (a missing key becomes 1).
+# Driver failures return StoreError. ttl <= 0 raises ArgumentError.
 class Alumna::RedisCache < Alumna::Cache
   def initialize(@redis : Alumna::Redis)
   end
 
-  def get(key : String) : Bytes?
+  def get(key : String) : Bytes? | Alumna::StoreError
     full = full_key(key)
     command do
       value = @redis.client.get(full)
@@ -15,7 +16,7 @@ class Alumna::RedisCache < Alumna::Cache
     end
   end
 
-  def set(key : String, value : Bytes, ttl : Time::Span? = nil) : Nil
+  def set(key : String, value : Bytes, ttl : Time::Span? = nil) : Nil | Alumna::StoreError
     px = milliseconds(ttl)
     full = full_key(key)
     command do
@@ -24,10 +25,11 @@ class Alumna::RedisCache < Alumna::Cache
       else
         @redis.client.set(full, value)
       end
+      nil
     end
   end
 
-  def set_nx(key : String, value : Bytes, ttl : Time::Span? = nil) : Bool
+  def set_nx(key : String, value : Bytes, ttl : Time::Span? = nil) : Bool | Alumna::StoreError
     px = milliseconds(ttl)
     full = full_key(key)
     command do
@@ -40,12 +42,12 @@ class Alumna::RedisCache < Alumna::Cache
     end
   end
 
-  def delete(key : String) : Nil
+  def delete(key : String) : Nil | Alumna::StoreError
     full = full_key(key)
-    command { @redis.client.del(full) }
+    command { @redis.client.del(full); nil }
   end
 
-  def incr(key : String) : Int64
+  def incr(key : String) : Int64 | Alumna::StoreError
     full = full_key(key)
     command { @redis.client.incr(full) }
   end
@@ -61,10 +63,12 @@ class Alumna::RedisCache < Alumna::Cache
     ttl.total_milliseconds.ceil.to_i64
   end
 
-  private def command(&)
+  private def command(& : -> T) : T | Alumna::StoreError forall T
     yield
+  rescue ex : ArgumentError
+    raise ex
   rescue ex
-    raise Alumna::Redis::Errors.wrap(ex)
+    Alumna::Redis::Errors.store(ex)
   end
 end
 
