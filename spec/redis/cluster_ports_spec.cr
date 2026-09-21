@@ -12,13 +12,13 @@ describe "Alumna::Redis ports on Cluster" do
       cache = holder.cache
       key = uniq
       cache.set(key, "hello".to_slice)
-      cache.get(key).should eq("hello".to_slice)
-      cache.set_nx(key, "nope".to_slice).should be_false
-      cache.set_nx(uniq, "a".to_slice, 1.hour).should be_true
-      cache.incr("gen-#{key}").should eq(1)
-      cache.incr("gen-#{key}").should eq(2)
+      must_ok(cache.get(key)).should eq("hello".to_slice)
+      must_ok(cache.set_nx(key, "nope".to_slice)).should be_false
+      must_ok(cache.set_nx(uniq, "a".to_slice, 1.hour)).should be_true
+      must_ok(cache.incr("gen-#{key}")).should eq(1)
+      must_ok(cache.incr("gen-#{key}")).should eq(2)
       cache.delete(key)
-      cache.get(key).should be_nil
+      must_ok(cache.get(key)).should be_nil
     ensure
       holder.close
     end
@@ -30,9 +30,9 @@ describe "Alumna::Redis ports on Cluster" do
       store = holder.session_store(ttl: 1.hour)
       id = store.new_id
       store.set(id, Alumna.hash(user_id: "1"))
-      store.get(id).should eq(Alumna.hash(user_id: "1"))
+      must_ok(store.get(id)).should eq(Alumna.hash(user_id: "1"))
       store.delete(id)
-      store.get(id).should be_nil
+      must_ok(store.get(id)).should be_nil
     ensure
       holder.close
     end
@@ -85,8 +85,8 @@ describe "Alumna::Redis ports on Cluster" do
     begin
       store = holder.rate_limit_store(1.hour)
       key = uniq
-      c1, t1 = store.hit(key)
-      c2, t2 = store.hit(key)
+      c1, t1 = must_ok(store.hit(key))
+      c2, t2 = must_ok(store.hit(key))
       c1.should eq(1)
       c2.should eq(2)
       t1.to_unix.should eq(t2.to_unix)

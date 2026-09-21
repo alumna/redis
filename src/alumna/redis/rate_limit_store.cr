@@ -1,5 +1,6 @@
 # Redis fixed-window rate-limit store. One key per limiter key (one Cluster slot).
 # Lua INCR + PEXPIRE on first hit (or when the key has no TTL). reset_at from PTTL.
+# Driver failures return StoreError. window <= 0 raises ArgumentError.
 class Alumna::RedisRateLimitStore < Alumna::RateLimitStore
   # INCR, set PX if this is the first hit or the key has no TTL, return {count, pttl}.
   SCRIPT = <<-LUA
@@ -23,12 +24,13 @@ class Alumna::RedisRateLimitStore < Alumna::RateLimitStore
     @px = milliseconds(@window)
   end
 
-  def hit(key : String) : Tuple(Int32, Time)
+  def hit(key : String) : Tuple(Int32, Time) | Alumna::StoreError
     full = full_key(key)
     px = @px
     reply = command do
       @redis.client.eval(SCRIPT, keys: [full], args: [px.to_s])
     end
+    return reply if reply.is_a?(Alumna::StoreError)
     n = 1_i64
     pttl = px
     if arr = reply.as?(Array)
@@ -54,10 +56,12 @@ class Alumna::RedisRateLimitStore < Alumna::RateLimitStore
     window.total_milliseconds.ceil.to_i64
   end
 
-  private def command(&)
+  private def command(& : -> T) : T | Alumna::StoreError forall T
     yield
+  rescue ex : ArgumentError
+    raise ex
   rescue ex
-    raise Alumna::Redis::Errors.wrap(ex)
+    Alumna::Redis::Errors.store(ex)
   end
 end
 

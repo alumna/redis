@@ -16,11 +16,11 @@ describe Alumna::RedisSessionStore do
     store = SHARED.session_store(ttl: 1.hour)
     id = store.new_id
     store.set(id, Alumna.hash(user_id: "1"))
-    store.get(id).should eq(Alumna.hash(user_id: "1"))
+    must_ok(store.get(id)).should eq(Alumna.hash(user_id: "1"))
   end
 
   it "returns nil for an unknown id" do
-    SHARED.session_store.get(uniq).should be_nil
+    must_ok(SHARED.session_store.get(uniq)).should be_nil
   end
 
   it "returns nil after delete" do
@@ -28,7 +28,7 @@ describe Alumna::RedisSessionStore do
     id = store.new_id
     store.set(id, Alumna.hash(k: "v"))
     store.delete(id)
-    store.get(id).should be_nil
+    must_ok(store.get(id)).should be_nil
   end
 
   it "deletes a missing id" do
@@ -40,7 +40,7 @@ describe Alumna::RedisSessionStore do
     id = store.new_id
     store.set(id, Alumna.hash(k: "v"))
     sleep 80.milliseconds
-    store.get(id).should be_nil
+    must_ok(store.get(id)).should be_nil
   end
 
   it "honors a per-set ttl" do
@@ -48,7 +48,7 @@ describe Alumna::RedisSessionStore do
     id = store.new_id
     store.set(id, Alumna.hash(k: "v"), 50.milliseconds)
     sleep 80.milliseconds
-    store.get(id).should be_nil
+    must_ok(store.get(id)).should be_nil
   end
 
   it "does not alias the stored hash with the caller hash" do
@@ -57,7 +57,7 @@ describe Alumna::RedisSessionStore do
     data = Alumna.hash(k: "v")
     store.set(id, data)
     data["k"] = "mutated"
-    got = store.get(id)
+    got = must_ok(store.get(id))
     if got
       got["k"].should eq("v")
     end
@@ -67,11 +67,11 @@ describe Alumna::RedisSessionStore do
     store = SHARED.session_store
     id = store.new_id
     store.set(id, Alumna.hash(k: "v"))
-    got = store.get(id)
+    got = must_ok(store.get(id))
     if got
       got["k"] = "mutated"
     end
-    again = store.get(id)
+    again = must_ok(store.get(id))
     if again
       again["k"].should eq("v")
     end
@@ -104,20 +104,20 @@ describe Alumna::RedisSessionStore do
     id = uniq
     raw = SHARED.key(SHARED.session_prefix, id)
     SHARED.client.set(raw, "{")
-    store.get(id).should be_nil
+    must_ok(store.get(id)).should be_nil
     SHARED.client.set(raw, "[1]")
-    store.get(id).should be_nil
+    must_ok(store.get(id)).should be_nil
   end
 
   it "uses the session prefix so two holders do not collide" do
-    a = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
-    b = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    a = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
+    b = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       id = "same"
       a.session_store.set(id, Alumna.hash(who: "A"))
       b.session_store.set(id, Alumna.hash(who: "B"))
-      a_got = a.session_store.get(id)
-      b_got = b.session_store.get(id)
+      a_got = must_ok(a.session_store.get(id))
+      b_got = must_ok(b.session_store.get(id))
       if a_got
         a_got["who"].should eq("A")
       end
@@ -130,13 +130,14 @@ describe Alumna::RedisSessionStore do
     end
   end
 
-  it "wraps a driver error without URI userinfo" do
-    holder = Alumna::Redis.new(dead_url(lazy: true))
+  it "returns StoreError without URI userinfo" do
+    holder = must_redis(Alumna::Redis.new(dead_url(lazy: true)))
     begin
-      ex = expect_raises(Alumna::Redis::Error) do
-        holder.session_store.get("x")
+      result = holder.session_store.get("x")
+      result.should be_a(Alumna::StoreError)
+      if result.is_a?(Alumna::StoreError)
+        result.message.includes?("secret").should be_false
       end
-      (ex.message || "").includes?("secret").should be_false
     ensure
       holder.close
     end

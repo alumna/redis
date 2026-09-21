@@ -4,7 +4,6 @@ version: 0.1.0
 dependencies:
   alumna:
     github: alumna/backend
-    version: ~> 0.8.0
   redis:
     github: jgaskins/redis
     version: ~> 0.16.0

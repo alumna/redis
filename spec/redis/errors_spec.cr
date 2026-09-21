@@ -20,9 +20,16 @@ describe Alumna::Redis::Errors do
   it "wraps a driver exception as Alumna::Redis::Error" do
     wrapped = Alumna::Redis::Errors.wrap(Exception.new("boom redis://u:secret@host/db"))
     wrapped.should be_a(Alumna::Redis::Error)
-    msg = wrapped.message || ""
-    msg.includes?("secret").should be_false
-    msg.should eq("boom redis://host/db")
+    wrapped.message.includes?("secret").should be_false
+    wrapped.message.should eq("boom redis://host/db")
+    wrapped.to_s.should eq("boom redis://host/db")
+  end
+
+  it "wraps a driver exception as Alumna::StoreError" do
+    wrapped = Alumna::Redis::Errors.store(Exception.new("boom redis://u:secret@host/db"))
+    wrapped.should be_a(Alumna::StoreError)
+    wrapped.message.includes?("secret").should be_false
+    wrapped.message.should eq("boom redis://host/db")
   end
 end
 

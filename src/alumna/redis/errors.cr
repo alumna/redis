@@ -2,8 +2,17 @@ require "alumna"
 require "redis"
 
 class Alumna::Redis
-  # Driver and connection errors. The message never includes URI userinfo.
-  class Error < Exception
+  # Operation errors for Alumna Redis. This is a struct, not an Exception.
+  # Programmer and config mistakes raise ArgumentError.
+  struct Error
+    getter message : String
+
+    def initialize(@message : String)
+    end
+
+    def to_s(io : IO) : Nil
+      io << @message
+    end
   end
 
   module Errors
@@ -18,6 +27,10 @@ class Alumna::Redis
 
     def self.wrap(ex : Exception) : Error
       Error.new(safe_message(ex))
+    end
+
+    def self.store(ex : Exception) : Alumna::StoreError
+      Alumna::StoreError.new(safe_message(ex))
     end
   end
 end

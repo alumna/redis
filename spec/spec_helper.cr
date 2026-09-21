@@ -23,9 +23,37 @@ rescue
   url.gsub(/\/\/[^\/\s]*@/, "//")
 end
 
+def connect_redis(uri : URI | String = REDIS_URL, **opts) : Alumna::Redis
+  result = Alumna::Redis.new(uri, **opts)
+  if result.is_a?(Alumna::Redis::Error)
+    abort "Redis connect failed at #{display_redis_url(uri.to_s)}. #{result.message}"
+  end
+  result
+end
+
+def must_redis(result : Alumna::Redis | Alumna::Redis::Error) : Alumna::Redis
+  if result.is_a?(Alumna::Redis::Error)
+    fail result.message
+  end
+  result
+end
+
+def must_ok(result : T | Alumna::StoreError) : T forall T
+  if result.is_a?(Alumna::StoreError)
+    fail result.message
+  end
+  result
+end
+
 def probe_redis : Nil
   holder = Alumna::Redis.new(REDIS_URL)
-  holder.ping
+  if holder.is_a?(Alumna::Redis::Error)
+    abort "Redis is not available at #{display_redis_url(REDIS_URL)}. Set REDIS_URL or start Redis on port 6379. #{holder.message}"
+  end
+  ping = holder.ping
+  if ping.is_a?(Alumna::Redis::Error)
+    abort "Redis is not available at #{display_redis_url(REDIS_URL)}. Set REDIS_URL or start Redis on port 6379. #{ping.message}"
+  end
   holder.close
 rescue ex
   safe = Alumna::Redis::Errors.safe_message(ex)
@@ -34,7 +62,7 @@ end
 
 probe_redis
 
-SHARED = Alumna::Redis.new(REDIS_URL, prefix: SPEC_PREFIX)
+SHARED = connect_redis(REDIS_URL, prefix: SPEC_PREFIX)
 
 def dead_url(*, lazy : Bool = false) : String
   params = lazy ? "initial_pool_size=0&connect_timeout=0.2" : "connect_timeout=0.2"
@@ -48,18 +76,19 @@ def require_cluster_url : String
   if url.nil? || url.empty?
     pending! "set REDIS_CLUSTER_URL to run Cluster examples"
   end
-  begin
-    holder = Alumna::Redis.new(url, cluster: true)
-    holder.ping
-    holder.close
-  rescue ex
-    safe = Alumna::Redis::Errors.safe_message(ex)
-    fail "Redis Cluster is not available at #{display_redis_url(url)}. Set REDIS_CLUSTER_URL to a live Cluster node. #{safe}"
+  holder = Alumna::Redis.new(url, cluster: true)
+  if holder.is_a?(Alumna::Redis::Error)
+    fail "Redis Cluster is not available at #{display_redis_url(url)}. Set REDIS_CLUSTER_URL to a live Cluster node. #{holder.message}"
   end
+  ping = holder.ping
+  if ping.is_a?(Alumna::Redis::Error)
+    fail "Redis Cluster is not available at #{display_redis_url(url)}. Set REDIS_CLUSTER_URL to a live Cluster node. #{ping.message}"
+  end
+  holder.close
   url
 end
 
 # Unique prefix so Cluster examples do not collide with each other or with Client specs.
 def new_cluster_holder : Alumna::Redis
-  Alumna::Redis.new(require_cluster_url, prefix: "#{SPEC_PREFIX}c:#{UUID.random}:", cluster: true)
+  connect_redis(require_cluster_url, prefix: "#{SPEC_PREFIX}c:#{UUID.random}:", cluster: true)
 end

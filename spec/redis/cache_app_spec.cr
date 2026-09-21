@@ -26,7 +26,7 @@ end
 
 describe "Alumna.cache(redis.cache)" do
   it "hits get on a second app after create on the first" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       rule = Alumna.cache(holder.cache, ttl: 1.hour)
       posts_a = Alumna::MemoryAdapter.new(cache_schema)
@@ -53,7 +53,7 @@ describe "Alumna.cache(redis.cache)" do
   end
 
   it "misses get when the id is unknown" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       rule = Alumna.cache(holder.cache, ttl: 1.hour)
       posts = CacheGetCounter.new(cache_schema)
@@ -70,7 +70,7 @@ describe "Alumna.cache(redis.cache)" do
   end
 
   it "fills a get miss with set_nx then hits" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       cache = holder.cache
       rule = Alumna.cache(cache, ttl: 1.hour)
@@ -92,7 +92,7 @@ describe "Alumna.cache(redis.cache)" do
   end
 
   it "writes through patch so the second app sees the new title" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       rule = Alumna.cache(holder.cache, ttl: 1.hour)
       posts_a = Alumna::MemoryAdapter.new(cache_schema)
@@ -119,7 +119,7 @@ describe "Alumna.cache(redis.cache)" do
   end
 
   it "deletes the get key on remove" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       cache = holder.cache
       rule = Alumna.cache(cache, ttl: 1.hour)
@@ -132,14 +132,14 @@ describe "Alumna.cache(redis.cache)" do
       id = client.post("/posts", body: %({"title":"A"})).json_hash["id"].as(String)
       client.delete("/posts/#{id}")
       client.get("/posts/#{id}").status.should eq(404)
-      cache.get(get_cache_key(id)).should be_nil
+      must_ok(cache.get(get_cache_key(id))).should be_nil
     ensure
       holder.close
     end
   end
 
   it "caches find on the same app" do
-    holder = Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:")
+    holder = must_redis(Alumna::Redis.new(REDIS_URL, prefix: "alumna-spec:#{UUID.random}:"))
     begin
       rule = Alumna.cache(holder.cache, ttl: 1.hour)
       posts = CacheGetCounter.new(cache_schema)

@@ -22,29 +22,36 @@ class Alumna::Redis
   getter rate_limit_prefix : String
   getter? cluster : Bool
 
-  def initialize(
+  # Open a client. Returns Error when the driver fails.
+  # Empty URL and a URI that does not parse raise ArgumentError.
+  def self.new(
     uri : URI | String,
     prefix : String = "",
     cache_prefix : String = CACHE_PREFIX,
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
     cluster : Bool = false,
-  )
-    @prefix = prefix
-    @cache_prefix = cache_prefix
-    @session_prefix = session_prefix
-    @rate_limit_prefix = rate_limit_prefix
-    @cluster = cluster
-    @client = begin
-      parsed = uri.is_a?(String) ? URI.parse(uri) : uri
-      if cluster
-        ::Redis::Cluster.new(parsed)
-      else
-        ::Redis::Client.new(parsed)
-      end
-    rescue ex
-      raise Errors.wrap(ex)
+  ) : self | Error
+    raise ArgumentError.new("Redis URL must not be empty") if uri.is_a?(String) && uri.empty?
+
+    parsed = begin
+      uri.is_a?(String) ? URI.parse(uri) : uri
+    rescue ex : URI::Error
+      raise ArgumentError.new(Errors.safe_message(ex))
     end
+
+    client = if cluster
+               ::Redis::Cluster.new(parsed)
+             else
+               ::Redis::Client.new(parsed)
+             end
+    holder = allocate
+    holder.initialize(client, prefix, cache_prefix, session_prefix, rate_limit_prefix, cluster)
+    holder
+  rescue ex : ArgumentError
+    raise ex
+  rescue ex
+    Errors.wrap(ex)
   end
 
   def self.from_uri(
@@ -54,7 +61,7 @@ class Alumna::Redis
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
     cluster : Bool = false,
-  )
+  ) : self | Error
     new(uri, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix, cluster: cluster)
   end
 
@@ -65,25 +72,33 @@ class Alumna::Redis
     session_prefix : String = SESSION_PREFIX,
     rate_limit_prefix : String = RATE_LIMIT_PREFIX,
     cluster : Bool = false,
-  )
+  ) : self | Error
     value = ENV[name]?
     if value.nil? || value.empty?
-      raise Error.new("Missing environment variable #{name}")
+      raise ArgumentError.new("Missing environment variable #{name}")
     end
     new(value, prefix: prefix, cache_prefix: cache_prefix, session_prefix: session_prefix, rate_limit_prefix: rate_limit_prefix, cluster: cluster)
   end
 
-  # PING. Returns "PONG". Cluster run() needs a key, so we send PING with a
-  # dummy argument (valid on Client and Cluster). Raises Error with userinfo
-  # stripped on failure.
-  def ping : String
-    @client.ping("PONG").as?(String) || "PONG"
-  rescue ex
-    raise Errors.wrap(ex)
+  protected def initialize(
+    @client : ::Redis::Client | ::Redis::Cluster,
+    @prefix : String,
+    @cache_prefix : String,
+    @session_prefix : String,
+    @rate_limit_prefix : String,
+    @cluster : Bool,
+  )
   end
 
-  def close : Nil
-    @client.close
+  # PING. Returns "PONG" or Error. Cluster run() needs a key, so we send PING
+  # with a dummy argument (valid on Client and Cluster). The message never
+  # includes URI userinfo.
+  def ping : String | Error
+    run { @client.ping("PONG").as?(String) || "PONG" }
+  end
+
+  def close : Nil | Error
+    run { close_client }
   end
 
   # Full key: global prefix + port prefix + name.
@@ -140,6 +155,19 @@ class Alumna::Redis
     else
       key
     end
+  end
+
+  private def close_client : Nil
+    @client.close
+  end
+
+  # Programmer mistakes (`ArgumentError`) leave the method. Driver failures become `Error`.
+  private def run(& : -> T) : T | Error forall T
+    yield
+  rescue ex : ArgumentError
+    raise ex
+  rescue ex
+    Errors.wrap(ex)
   end
 end
 

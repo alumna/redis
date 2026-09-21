@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - 2026-09-21
+
+### Changed
+* **errors:** `Alumna::Redis::Error` is a struct. Holder `new` / `from_uri` / `from_env` / `ping` / `close` return `T \| Error`. Missing or empty env, empty URL, and a URI that does not parse raise `ArgumentError`.
+* **ports:** `RedisCache`, `RedisSessionStore`, and `RedisRateLimitStore` return backend `Alumna::StoreError` on driver failure. `ttl <= 0` / `window <= 0` stay `ArgumentError`.
+* **docs:** README documents the holder and port return types. Miss stays `nil`. Store-down is `StoreError`.
+
 ## 0.1.0 - 2026-09-17
 
 ### Added
