@@ -31,7 +31,7 @@ class Alumna::RedisSessionStore < Alumna::SessionStore
   end
 
   private def full_key(id : String) : String
-    @redis.key(@redis.session_prefix, id)
+    @redis.session_key(id)
   end
 
   # Redis PX is whole milliseconds. A positive ttl below 1 ms becomes 1 ms.

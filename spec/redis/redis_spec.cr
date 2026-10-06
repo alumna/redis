@@ -98,7 +98,20 @@ describe Alumna::Redis do
     Alumna::Redis.tagged_cache_name("alumna:find:3:/posts").should eq("alumna:find:3:/posts")
     Alumna::Redis.tagged_cache_name("alumna:find:3:/posts:").should eq("alumna:find:3:/posts:")
     Alumna::Redis.tagged_cache_name("alumna:find:3::abc").should eq("alumna:find:3::abc")
+    Alumna::Redis.tagged_cache_name("alumna:get:/pó:12").should eq("{/pó}:get:12")
     SHARED.cache_redis_key("alumna:get:/posts:12").should eq("#{SPEC_PREFIX}alumna:cache:{/posts}:get:12")
+    SHARED.cache_redis_key("plain").should eq("#{SPEC_PREFIX}alumna:cache:plain")
+    SHARED.cache_redis_key("alumna:get:/posts").should eq("#{SPEC_PREFIX}alumna:cache:alumna:get:/posts")
+    bare = must_redis(Alumna::Redis.new(REDIS_URL, cache_prefix: "", session_prefix: "", rate_limit_prefix: ""))
+    begin
+      bare.key("", "x").should eq("x")
+      bare.cache_redis_key("alumna:get:/posts:12").should eq("{/posts}:get:12")
+      bare.cache_redis_key("plain").should eq("plain")
+      bare.session_key("sid").should eq("sid")
+      bare.rate_limit_key("rl").should eq("rl")
+    ensure
+      bare.close
+    end
   end
 
   it "uses default port prefixes and joins a global prefix" do
@@ -126,7 +139,7 @@ describe Alumna::Redis do
     if result.is_a?(Alumna::Redis::Error)
       result.message.includes?("secret").should be_false
       result.message.includes?("user:").should be_false
-      result.message.includes?("Connection refused").should be_true
+      result.message.includes?("#{DEAD_HOST}:#{DEAD_PORT}").should be_true
     end
   end
 

@@ -1,7 +1,7 @@
 require "./redis/errors"
 require "redis/cluster"
 
-# One Redis client for the process. Cache, session, and rate limit ports.
+# One Redis client for the process. Cache, session, rate limit, and geo.
 # Default is single-node Redis::Client. Pass cluster: true for Redis::Cluster.
 # Cluster URI may be any node; the driver discovers the rest. Cluster uses db 0.
 # No Sentinel.
@@ -88,6 +88,10 @@ class Alumna::Redis
     @rate_limit_prefix : String,
     @cluster : Bool,
   )
+    # Heads are prefix + port prefix, built once per process.
+    @cache_head = @prefix + @cache_prefix
+    @session_head = @prefix + @session_prefix
+    @rate_limit_head = @prefix + @rate_limit_prefix
   end
 
   # PING. Returns "PONG" or Error. Cluster run() needs a key, so we send PING
@@ -102,58 +106,134 @@ class Alumna::Redis
   end
 
   # Full key: global prefix + port prefix + name.
+  # Both prefixes empty returns `name` with no copy.
   def key(port_prefix : String, name : String) : String
-    String.build { |io|
-      io << @prefix
-      io << port_prefix
-      io << name
-    }
+    concat3(@prefix, port_prefix, name)
+  end
+
+  def session_key(name : String) : String
+    concat_head(@session_head, name)
+  end
+
+  def rate_limit_key(name : String) : String
+    concat_head(@rate_limit_head, name)
   end
 
   # Redis cache key for a logical Cache name. Service get/find/fgen keys that
   # share a path get a hash-tag so they hash to one Cluster slot.
+  # The head and the tagged name are written in one string.
   def cache_redis_key(logical : String) : String
-    key(@cache_prefix, self.class.tagged_cache_name(logical))
+    head = @cache_head
+    if head.empty?
+      self.class.tagged_cache_name(logical)
+    elsif self.class.service_cache_key?(logical)
+      String.build(head.bytesize + logical.bytesize + 8) do |io|
+        io << head
+        io << logical unless self.class.write_tagged(io, logical)
+      end
+    else
+      concat_head(head, logical)
+    end
   end
 
   # Map logical Cache keys to Redis names. Other keys are unchanged.
   # alumna:get:/posts:12          → {/posts}:get:12
   # alumna:fgen:/posts            → {/posts}:fgen
   # alumna:find:{gen}:/posts:{fp} → {/posts}:find:{gen}:{fp}
+  # Unchanged names are the same string (no copy).
   def self.tagged_cache_name(key : String) : String
+    unless service_cache_key?(key)
+      return key
+    end
+    written = false
+    built = String.build(key.bytesize + 8) do |io|
+      written = write_tagged(io, key)
+    end
+    written ? built : key
+  end
+
+  # :nodoc:
+  def self.service_cache_key?(key : String) : Bool
+    key.starts_with?(GET_LOGICAL) || key.starts_with?(FGEN_LOGICAL) || key.starts_with?(FIND_LOGICAL)
+  end
+
+  # Writes the tagged name. Returns false when the name stays as given.
+  # :nodoc:
+  def self.write_tagged(io : IO, key : String) : Bool
     if key.starts_with?(GET_LOGICAL)
-      rest = key[GET_LOGICAL.size..]
-      colon = rest.rindex(':')
-      return key unless colon
-      return key if colon == 0 || colon >= rest.size - 1
-      path = rest[0, colon]
-      id = rest[colon + 1..]
-      String.build { |io|
-        io << '{' << path << "}:get:" << id
-      }
+      write_get(io, key)
     elsif key.starts_with?(FGEN_LOGICAL)
-      path = key[FGEN_LOGICAL.size..]
-      return key if path.empty?
-      String.build { |io|
-        io << '{' << path << "}:fgen"
-      }
-    elsif key.starts_with?(FIND_LOGICAL)
-      rest = key[FIND_LOGICAL.size..]
-      first = rest.index(':')
-      return key unless first
-      return key if first == 0
-      gen = rest[0, first]
-      tail = rest[first + 1..]
-      last = tail.rindex(':')
-      return key unless last
-      return key if last == 0 || last >= tail.size - 1
-      path = tail[0, last]
-      fingerprint = tail[last + 1..]
-      String.build { |io|
-        io << '{' << path << "}:find:" << gen << ':' << fingerprint
-      }
+      write_fgen(io, key)
     else
-      key
+      write_find(io, key)
+    end
+  end
+
+  private def self.write_get(io : IO, key : String) : Bool
+    start = GET_LOGICAL.size
+    colon = key.rindex(':')
+    return false unless colon
+    rel = colon - start
+    rest = key.size - start
+    return false if rel <= 0 || rel >= rest - 1
+    io << '{'
+    write_chars(io, key, start, rel)
+    io << "}:get:"
+    write_chars(io, key, colon + 1, key.size - colon - 1)
+    true
+  end
+
+  private def self.write_fgen(io : IO, key : String) : Bool
+    start = FGEN_LOGICAL.size
+    return false if start >= key.size
+    io << '{'
+    write_chars(io, key, start, key.size - start)
+    io << "}:fgen"
+    true
+  end
+
+  private def self.write_find(io : IO, key : String) : Bool
+    start = FIND_LOGICAL.size
+    first = key.index(':', start)
+    return false unless first
+    return false if first == start
+    last = key.rindex(':')
+    return false if !last || last <= first + 1 || last >= key.size - 1
+    io << '{'
+    write_chars(io, key, first + 1, last - first - 1)
+    io << "}:find:"
+    write_chars(io, key, start, first - start)
+    io << ':'
+    write_chars(io, key, last + 1, key.size - last - 1)
+    true
+  end
+
+  # Char indexes. The byte copy does not allocate a substring.
+  private def self.write_chars(io : IO, str : String, start : Int, count : Int) : Nil
+    b0 = str.char_index_to_byte_index(start)
+    b1 = str.char_index_to_byte_index(start + count)
+    if b0 && b1
+      io.write(str.to_slice[b0, b1 - b0])
+    end
+  end
+
+  private def concat_head(head : String, name : String) : String
+    return name if head.empty?
+    String.build(head.bytesize + name.bytesize) do |io|
+      io << head
+      io << name
+    end
+  end
+
+  private def concat3(prefix : String, port_prefix : String, name : String) : String
+    if prefix.empty? && port_prefix.empty?
+      name
+    else
+      String.build(prefix.bytesize + port_prefix.bytesize + name.bytesize) do |io|
+        io << prefix
+        io << port_prefix
+        io << name
+      end
     end
   end
 
@@ -174,3 +254,4 @@ end
 require "./redis/cache"
 require "./redis/session_store"
 require "./redis/rate_limit_store"
+require "./redis/geo"

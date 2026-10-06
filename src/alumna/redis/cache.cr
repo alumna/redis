@@ -73,7 +73,15 @@ class Alumna::RedisCache < Alumna::Cache
 end
 
 class Alumna::Redis
-  def cache : Alumna::RedisCache
-    Alumna::RedisCache.new(self)
+  @cache : RedisCache?
+
+  # One cache object per holder. The object holds no request state.
+  def cache : RedisCache
+    cache = @cache
+    if cache
+      cache
+    else
+      @cache = RedisCache.new(self)
+    end
   end
 end
