@@ -9,6 +9,7 @@ Redis stores for the [Alumna Backend Framework](https://github.com/alumna/backen
 - `redis.cache` — `Alumna::RedisCache` (`Alumna::Cache`)
 - `redis.session_store` — `Alumna::RedisSessionStore` (`Alumna::SessionStore`)
 - `redis.rate_limit_store` — `Alumna::RedisRateLimitStore` (`Alumna::RateLimitStore`)
+- `redis.geo` — `Alumna::Redis::Geo` (geospatial index)
 
 See [ROADMAP.md](ROADMAP.md).
 
@@ -22,10 +23,11 @@ See [ROADMAP.md](ROADMAP.md).
 5. [Service cache](#5-service-cache)
 6. [Session](#6-session)
 7. [Rate limit](#7-rate-limit)
-8. [Errors](#8-errors)
-9. [Security](#9-security)
-10. [Testing](#10-testing)
-11. [License](#11-license)
+8. [Geo](#8-geo)
+9. [Errors](#9-errors)
+10. [Security](#10-security)
+11. [Testing](#11-testing)
+12. [License](#12-license)
 
 ---
 
@@ -113,6 +115,7 @@ Redis is often shared. Every port adds a prefix:
 | Cache | `alumna:cache:` |
 | Session | `alumna:sid:` |
 | Rate limit | `alumna:rl:` |
+| Geo | global prefix only |
 
 You can set a global prefix and override a port prefix:
 
@@ -135,6 +138,8 @@ Service cache keys from `Alumna.cache` get a hash-tag around the service path. T
 | `alumna:find:{gen}:/posts:{hash}` | `…alumna:cache:{/posts}:find:{gen}:{hash}` |
 
 This changes keys already stored in Redis under the untagged shape. Session and rate-limit keys stay one key with no hash-tag.
+
+A geo index name is application data. `redis.geo` prepends the global prefix and no other prefix.
 
 ---
 
@@ -222,7 +227,47 @@ Two processes that share this Redis share the counters. One Redis key per limite
 
 ---
 
-## 8. Errors
+## 8. Geo
+
+`redis.geo` is an `Alumna::Redis::Geo`. One index is one Redis key. The key is the global prefix plus the name. There is no `alumna:geo:` prefix.
+
+Add members with `add`. Read positions with `pos`. Read the distance with `dist`. Read geohash strings with `hash`. Search with `search`. Copy a search into another key with `store`. Remove members with `remove`.
+
+A missing member is nil. An empty search is an empty array. A driver failure returns `Alumna::Redis::Error`. These calls raise `ArgumentError`:
+
+- `nx` and `xx` together
+- `count` less than or equal to 0
+- a negative radius, box width, or box height
+
+Radius `0` and box `0` are valid. Redis checks longitude and latitude.
+
+`dist` uses meters when you omit the unit. `Hit#distance` and the coordinates are the decimal strings Redis returns. They are not bit-exact. `Hit#hash` is the 52-bit score from `WITHHASH`. `hash` returns geohash strings. Those two values are different.
+
+`store` on Cluster needs the same hash tag in the destination name and the source name. An empty result deletes the destination key.
+
+```crystal
+geo = redis.geo
+added = geo.add("drivers",
+  Alumna::Redis::Geo::Member.new("-81.68", "41.50", "driver-1"),
+)
+if added.is_a?(Alumna::Redis::Error)
+  # Handle the failure. The message has no URI userinfo.
+else
+  hits = geo.search("drivers",
+    fromlonlat: {"-81.68", "41.47"},
+    byradius: Alumna::Redis::Geo::Radius.new(5, Alumna::Redis::Geo::Unit::MI),
+    sort: Alumna::Redis::Geo::Sort::ASC,
+    withdist: true,
+    withcoord: true,
+  )
+end
+```
+
+Units are `M`, `KM`, `FT`, and `MI`. Use `search`. The old radius commands are not part of this API.
+
+---
+
+## 9. Errors
 
 `Alumna::Redis::Error` is a **struct**, not an Exception. Holder `new` / `from_uri` / `from_env` / `ping` / `close` return `T | Error`. Cache, session, and rate-limit port methods return backend `Alumna::StoreError` on driver failure. The message never includes URI userinfo (user and password).
 
@@ -240,6 +285,11 @@ In the table, `Error` is `Alumna::Redis::Error`.
 | `RedisSessionStore#get` | `Hash? \| StoreError` |
 | `RedisSessionStore#set` / `delete` | `Nil \| StoreError` |
 | `RedisRateLimitStore#hit` | `{Int32, Time} \| StoreError` |
+| `Redis::Geo#add` / `remove` / `store` | `Int64 \| Error` |
+| `Redis::Geo#pos` | `Array({String, String}?) \| Error` |
+| `Redis::Geo#dist` | `String? \| Error` |
+| `Redis::Geo#hash` | `Array(String?) \| Error` |
+| `Redis::Geo#search` | `Array(Redis::Geo::Hit) \| Error` |
 
 `Cache#get` `nil` is a miss. `SessionStore#get` `nil` is no session. `StoreError` is store down. `Alumna.cache` / `Alumna.session` / `Alumna.rate_limit` map `StoreError` to `ServiceError.internal` (HTTP 500).
 
@@ -252,10 +302,13 @@ These calls raise `ArgumentError`. They do not return `Error`.
 | Missing or empty environment variable | `from_env` |
 | `ttl <= 0` | cache `set` / `set_nx`, session `set` / boot |
 | `window <= 0` | rate-limit store boot |
+| `nx` and `xx` together | geo `add` |
+| `count <= 0`, or `any` without `count` | geo `search` / `store` |
+| negative radius or box size | geo `search` / `store` |
 
 ---
 
-## 9. Security
+## 10. Security
 
 - Do not log the Redis URI. It may contain a password.
 - `Alumna::Redis::Error` strips `//user:pass@` from messages.
@@ -265,7 +318,7 @@ These calls raise `ArgumentError`. They do not return `Error`.
 
 ---
 
-## 10. Testing
+## 11. Testing
 
 Specs need Redis. Set `REDIS_URL` or use `redis://127.0.0.1:6379/0`. If Redis is down, the spec process stops with a clear message.
 
@@ -289,6 +342,6 @@ GitHub Actions:
 
 ---
 
-## 11. License
+## 12. License
 
 MIT

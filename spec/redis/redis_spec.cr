@@ -126,7 +126,7 @@ describe Alumna::Redis do
     if result.is_a?(Alumna::Redis::Error)
       result.message.includes?("secret").should be_false
       result.message.includes?("user:").should be_false
-      result.message.includes?("Connection refused").should be_true
+      result.message.includes?("#{DEAD_HOST}:#{DEAD_PORT}").should be_true
     end
   end
 

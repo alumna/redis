@@ -1,7 +1,7 @@
 require "./redis/errors"
 require "redis/cluster"
 
-# One Redis client for the process. Cache, session, and rate limit ports.
+# One Redis client for the process. Cache, session, rate limit, and geo.
 # Default is single-node Redis::Client. Pass cluster: true for Redis::Cluster.
 # Cluster URI may be any node; the driver discovers the rest. Cluster uses db 0.
 # No Sentinel.
@@ -174,3 +174,4 @@ end
 require "./redis/cache"
 require "./redis/session_store"
 require "./redis/rate_limit_store"
+require "./redis/geo"
