@@ -47,8 +47,15 @@ class Alumna::Redis
       FT
       MI
 
+      # Literals, so a search does not allocate the unit token.
       def to_s : String
-        super.downcase
+        case self
+        when M  then "m"
+        when KM then "km"
+        when FT then "ft"
+        when MI then "mi"
+        else         super
+        end
       end
     end
 
@@ -330,7 +337,15 @@ class Alumna::Redis
     end
   end
 
+  @geo : Geo?
+
+  # One geo object per holder. The object holds no request state.
   def geo : Geo
-    Geo.new(self)
+    geo = @geo
+    if geo
+      geo
+    else
+      @geo = Geo.new(self)
+    end
   end
 end

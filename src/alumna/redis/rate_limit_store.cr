@@ -19,16 +19,21 @@ class Alumna::RedisRateLimitStore < Alumna::RateLimitStore
 
   getter window : Time::Span
   @px : Int64
+  @px_arg : String
 
   def initialize(@redis : Alumna::Redis, @window : Time::Span = 60.seconds)
     @px = milliseconds(@window)
+    # The Lua arg does not change for the life of this store.
+    @px_arg = @px.to_s
   end
 
   def hit(key : String) : Tuple(Int32, Time) | Alumna::StoreError
     full = full_key(key)
     px = @px
+    px_arg = @px_arg
     reply = command do
-      @redis.client.eval(SCRIPT, keys: [full], args: [px.to_s])
+      # Tuple keys/args stay on the stack. The driver copies them into its command.
+      @redis.client.eval(SCRIPT, keys: {full}, args: {px_arg})
     end
     return reply if reply.is_a?(Alumna::StoreError)
     n = 1_i64
@@ -47,7 +52,7 @@ class Alumna::RedisRateLimitStore < Alumna::RateLimitStore
   end
 
   private def full_key(key : String) : String
-    @redis.key(@redis.rate_limit_prefix, key)
+    @redis.rate_limit_key(key)
   end
 
   # Redis PX is whole milliseconds. A positive window below 1 ms becomes 1 ms.

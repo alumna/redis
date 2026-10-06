@@ -138,6 +138,7 @@ describe Alumna::Redis::Geo do
     Alumna::Redis::Geo::Unit::KM.to_s.should eq("km")
     Alumna::Redis::Geo::Unit::FT.to_s.should eq("ft")
     Alumna::Redis::Geo::Unit::MI.to_s.should eq("mi")
+    Alumna::Redis::Geo::Unit.new(99).to_s.should eq("99")
   end
 
   it "returns geohash strings" do
