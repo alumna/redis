@@ -47,8 +47,8 @@ class Alumna::Redis
       FT
       MI
 
-      def to_s(io : IO) : Nil
-        io << name.downcase
+      def to_s : String
+        super.downcase
       end
     end
 

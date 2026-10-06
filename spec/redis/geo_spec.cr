@@ -133,6 +133,13 @@ describe Alumna::Redis::Geo do
     ft.to_f.should be_close(36491.0, 20.0)
   end
 
+  it "sends unit tokens in lower case" do
+    Alumna::Redis::Geo::Unit::M.to_s.should eq("m")
+    Alumna::Redis::Geo::Unit::KM.to_s.should eq("km")
+    Alumna::Redis::Geo::Unit::FT.to_s.should eq("ft")
+    Alumna::Redis::Geo::Unit::MI.to_s.should eq("mi")
+  end
+
   it "returns geohash strings" do
     name = uniq
     geo = SHARED.geo
