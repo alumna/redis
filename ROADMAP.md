@@ -18,9 +18,9 @@ Driver: `jgaskins/redis`. Default topology: single-node `Redis::Client`. Redis C
 * Hash-tags on Redis cache keys that share a service path (`get` / `find` / `fgen` → `{/posts}`). Session and rate limit stay one key.
 * GitHub CI: Redis service, format, spec, `preview_mt`, kcov 100% on `src/` (standalone 6379). Extra job for Redis Cluster.
 
-## Unreleased
+## Delivered - 0.3.0
 
-* `Alumna::Redis#geo` (`Alumna::Redis::Geo`): `add`, `pos`, `dist`, `hash`, `search`, `store`, `remove`. One key per index. Global prefix only. `store` on Cluster needs one shared hash tag. An empty `store` deletes the destination key.
+* `Alumna::Redis#geo` (`Alumna::Redis::Geo`): `add`, `pos`, `dist`, `hash`, `search`, `store`, `remove`. One key per index. Global prefix only. `store` on Cluster needs one shared hash tag. An empty `store` deletes the destination key. Tag `v0.3.0`.
 
 ## Next
 
